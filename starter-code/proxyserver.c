@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "proxyserver.h"
+#include "safequeue.h"
 
 
 /*
@@ -168,15 +169,35 @@ void serve_forever(int *server_fd) {
                inet_ntoa(client_address.sin_addr),
                client_address.sin_port);
 
-        serve_request(client_fd);
+        work *w = malloc(sizeof(work)); // listener thread assigns priority for work
+        add_work(w);
+        do_work();
+        // signal to worker threads?
+
+        //=== Worker thread function
+
+        //serve_request(client_fd);
+
 
         // close the connection to the client
-        shutdown(client_fd, SHUT_WR);
-        close(client_fd);
+        //shutdown(client_fd, SHUT_WR);
+        //close(client_fd);
+
+        //===
+
     }
 
     shutdown(*server_fd, SHUT_RDWR);
     close(*server_fd);
+}
+
+void do_work() {
+    //while(1) {
+        work *w = get_work();
+        serve_request(w->client_fd);
+        shutdown(w->client_fd, SHUT_WR);
+        close(w->client_fd);
+    //}
 }
 
 /*
@@ -253,6 +274,10 @@ int main(int argc, char **argv) {
         }
     }
     print_settings();
+
+    create_queue(max_queue_size);
+
+    //create_workers(num_workers);
 
     serve_forever(&server_fd);
 
