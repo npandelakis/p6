@@ -32,5 +32,3 @@ int add_work(work *w);
 work *get_work();
 
 int get_work_nonblocking();
-
-void do_work();

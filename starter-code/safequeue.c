@@ -24,11 +24,12 @@ int add_work(work *w) {
 }
 
 work *get_work() {
-    if (myHeap == NULL) {
-        exit(-1);
-    }
     work *w;
     pthread_mutex_lock(&lock);
+    if (myHeap->size == 0) {
+        pthread_mutex_unlock(&lock);
+        return NULL;
+    }
     // while (myHeap->size == 0) {
         // condition variable
     //}

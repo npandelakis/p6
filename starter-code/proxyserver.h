@@ -32,6 +32,11 @@ typedef enum scode {
  *     close(fd);
  */
 
+struct serve_args {
+    int *server_fd;
+    int port_index;
+};
+
 
 /*
  * Functions for parsing an HTTP request.

@@ -21,7 +21,7 @@
 /*
  * Constants
  */
-#define RESPONSE_BUFSIZE 10000
+#define RESPONSE_BUFSIZE 10000 // 10000
 
 /*
  * Global configuration variables.
@@ -29,8 +29,12 @@
  * command line arguments (already implemented for you).
  */
 int num_listener;
+pthread_t *listener_threads;
 int *listener_ports;
+struct serve_args **serve_args_arr;
+int *server_fd_arr;
 int num_workers;
+pthread_t *worker_threads;
 char *fileserver_ipaddr;
 int fileserver_port;
 int max_queue_size;
@@ -51,12 +55,15 @@ void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
  */
 void serve_request(int client_fd) {
 
+    printf("fileserver_fd\n");
     // create a fileserver socket
     int fileserver_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (fileserver_fd == -1) {
         fprintf(stderr, "Failed to create a new socket: error %d: %s\n", errno, strerror(errno));
         exit(errno);
     }
+
+    printf("after fileserver_fd\n");
 
     // create the full fileserver address
     struct sockaddr_in fileserver_address;
@@ -73,11 +80,9 @@ void serve_request(int client_fd) {
         send_error_response(client_fd, BAD_GATEWAY, "Bad Gateway");
         return;
     }
-
     // successfully connected to the file server
     char *buffer = (char *)malloc(RESPONSE_BUFSIZE * sizeof(char));
-
-    // forward the client request to the fileserver
+    printf("client_fd: %d\n",client_fd);
     int bytes_read = read(client_fd, buffer, RESPONSE_BUFSIZE);
     int ret = http_send_data(fileserver_fd, buffer, bytes_read);
     if (ret < 0) {
@@ -106,14 +111,18 @@ void serve_request(int client_fd) {
 }
 
 
-int server_fd;
+int server_fd_1;
+int server_fd_2;
 /*
  * opens a TCP stream socket on all interfaces with port number PORTNO. Saves
  * the fd number of the server socket in *socket_number. For each accepted
  * connection, calls request_handler with the accepted fd number.
  */
-void serve_forever(int *server_fd) {
-
+void *serve_forever(void *s) {
+    printf("serve_forever\n");
+    int *server_fd = ((struct serve_args *)s)->server_fd;
+    int i = ((struct serve_args *)s)->port_index;
+    printf("initialized serve_args\n");
     // create a socket to listen
     *server_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (*server_fd == -1) {
@@ -130,7 +139,7 @@ void serve_forever(int *server_fd) {
     }
 
 
-    int proxy_port = listener_ports[0];
+    int proxy_port = listener_ports[i];
     // create the full address of this proxyserver
     struct sockaddr_in proxy_address;
     memset(&proxy_address, 0, sizeof(proxy_address));
@@ -170,8 +179,8 @@ void serve_forever(int *server_fd) {
                client_address.sin_port);
 
         work *w = malloc(sizeof(work)); // listener thread assigns priority for work
+        w->client_fd = client_fd;
         add_work(w);
-        do_work();
         // signal to worker threads?
 
         //=== Worker thread function
@@ -191,13 +200,17 @@ void serve_forever(int *server_fd) {
     close(*server_fd);
 }
 
-void do_work() {
-    //while(1) {
-        work *w = get_work();
-        serve_request(w->client_fd);
-        shutdown(w->client_fd, SHUT_WR);
-        close(w->client_fd);
-    //}
+void *do_work(void *v) {
+    work *w;
+    while(1) {
+        w = get_work();
+        if (w != NULL) {
+            printf("working\n");
+            serve_request(w->client_fd);
+            shutdown(w->client_fd, SHUT_WR);
+            close(w->client_fd);
+        }
+    }
 }
 
 /*
@@ -231,7 +244,8 @@ void print_settings() {
 void signal_callback_handler(int signum) {
     printf("Caught signal %d: %s\n", signum, strsignal(signum));
     for (int i = 0; i < num_listener; i++) {
-        if (close(server_fd) < 0) perror("Failed to close server_fd (ignoring)\n");
+        if (close(server_fd_1) < 0) perror("Failed to close server_fd (ignoring)\n");
+        if (close(server_fd_2) < 0) perror("Failed to close server_fd (ignoring)\n");
     }
     free(listener_ports);
     exit(0);
@@ -244,6 +258,36 @@ void exit_with_usage() {
     fprintf(stderr, "%s", USAGE);
     exit(EXIT_SUCCESS);
 }
+
+void join_threads(pthread_t *thread_array, int num_threads){
+    for(int i=0; i<num_threads;i++){
+        pthread_join(thread_array[i],NULL);
+    }
+}
+
+void create_workers(int num_workers) {
+    printf("create_workers\n");
+
+    for(int i =0; i<num_workers;i++){
+        if(pthread_create(&worker_threads[i], NULL, do_work, NULL)!=0){
+            printf("error creating worker thread\n");
+        }
+    }
+}
+
+void create_listeners(int num_listeners) {
+    struct serve_args *args;
+    for (int i = 0; i < num_listeners; i++) {
+        args = malloc(sizeof(struct serve_args));
+        args->server_fd = &server_fd_arr[i];
+        args->port_index = i;
+        serve_args_arr[i] = args;
+        if(pthread_create(&listener_threads[i], NULL, serve_forever, (void *)args)!=0){
+            printf("error creating listener thread\n");
+        }
+    }
+}
+
 
 int main(int argc, char **argv) {
     signal(SIGINT, signal_callback_handler);
@@ -273,13 +317,24 @@ int main(int argc, char **argv) {
             exit_with_usage();
         }
     }
+
+    
     print_settings();
 
+    listener_threads = (pthread_t *)malloc(num_listener * sizeof(pthread_t));
+    serve_args_arr = (struct serve_args **)malloc(num_listener * sizeof(struct serve_args *));
+    server_fd_arr = malloc(num_listener * sizeof(int));
+
+    worker_threads = (pthread_t *)malloc(num_workers * sizeof(pthread_t));
+    printf("creating queue\n");
     create_queue(max_queue_size);
+    printf("creating workers\n");
+    create_workers(num_workers);
+    printf("creating listeners\n");
+    create_listeners(num_listener);
 
-    //create_workers(num_workers);
-
-    serve_forever(&server_fd);
+    join_threads(worker_threads, num_workers);
+    join_threads(listener_threads, num_listener);
 
     return EXIT_SUCCESS;
 }

@@ -72,6 +72,7 @@ class Test1(Test):
         self.score = 1
 
         o = send_req_proxy(self.path, self.proxy_ports[0]).content
+
         exp_o = send_req(self.path)
         if o != exp_o:
             print(f'Px: {o} tg: {exp_o}')
@@ -391,8 +392,8 @@ def send_req_with_delay_fail(path, port, delay):
     url = b + path
     hdrs = {'Delay': f'{delay}'}
     try:
-    	r = requests.get(url, headers=hdrs)
-    	return r.content
+        r = requests.get(url, headers=hdrs)
+        return r.content
     except:
         pass
 
@@ -452,8 +453,10 @@ print(f'Server address: {server_host}:{server_port}')
 time.sleep(0.5)
 
 # Tests to run
-tests = [Test1(), Test2(), Test3(), Test4(), Test5(), Test6(), Test7(), Test8(), Test9(), Test10(),
-         ]
+tests = [Test1(),Test2(), Test3(), Test4(), Test5(), Test6(), Test7(), Test8(), Test9(), Test10(),
+        ]
+
+
 
 ts = run_tests(tests)
 print(f'Total score: {ts}')
