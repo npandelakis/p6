@@ -45,7 +45,9 @@ void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
     http_end_headers(client_fd);
     char *buf = malloc(strlen(err_msg) + 2);
     sprintf(buf, "%s\n", err_msg);
+    printf("%s\n", err_msg);
     http_send_string(client_fd, buf);
+    printf("sent string to client %d\n",client_fd);
     return;
 }
 
@@ -53,7 +55,7 @@ void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
  * forward the client request to the fileserver and
  * forward the fileserver response to the client
  */
-void serve_request(int client_fd) {
+void serve_request(int client_fd, struct work *w) {
 
     printf("fileserver_fd\n");
     // create a fileserver socket
@@ -63,7 +65,7 @@ void serve_request(int client_fd) {
         exit(errno);
     }
 
-    printf("after fileserver_fd\n");
+    printf("after fileserver_fd: %d\n",fileserver_fd);
 
     // create the full fileserver address
     struct sockaddr_in fileserver_address;
@@ -81,10 +83,10 @@ void serve_request(int client_fd) {
         return;
     }
     // successfully connected to the file server
-    char *buffer = (char *)malloc(RESPONSE_BUFSIZE * sizeof(char));
-    printf("client_fd: %d\n",client_fd);
-    int bytes_read = read(client_fd, buffer, RESPONSE_BUFSIZE);
-    int ret = http_send_data(fileserver_fd, buffer, bytes_read);
+    // char *buffer = (char *)malloc(RESPONSE_BUFSIZE * sizeof(char));
+    // printf("client_fd: %d\n",client_fd);
+    // int bytes_read = read(client_fd, buffer, RESPONSE_BUFSIZE);
+    int ret = http_send_data(fileserver_fd, w->buffer, w->bytes_read);
     if (ret < 0) {
         printf("Failed to send request to the file server\n");
         send_error_response(client_fd, BAD_GATEWAY, "Bad Gateway");
@@ -92,10 +94,10 @@ void serve_request(int client_fd) {
     } else {
         // forward the fileserver response to the client
         while (1) {
-            int bytes_read = recv(fileserver_fd, buffer, RESPONSE_BUFSIZE - 1, 0);
+            int bytes_read = recv(fileserver_fd, w->buffer, RESPONSE_BUFSIZE - 1, 0);
             if (bytes_read <= 0) // fileserver_fd has been closed, break
                 break;
-            ret = http_send_data(client_fd, buffer, bytes_read);
+            ret = http_send_data(client_fd, w->buffer, bytes_read);
             if (ret < 0) { // write failed, client_fd has been closed
                 break;
             }
@@ -107,7 +109,7 @@ void serve_request(int client_fd) {
     close(fileserver_fd);
 
     // Free resources and exit
-    free(buffer);
+    free(w->buffer);
 }
 
 
@@ -166,6 +168,7 @@ void *serve_forever(void *s) {
     size_t client_address_length = sizeof(client_address);
     int client_fd;
     while (1) {
+        printf("listening\n");
         client_fd = accept(*server_fd,
                            (struct sockaddr *)&client_address,
                            (socklen_t *)&client_address_length);
@@ -178,21 +181,46 @@ void *serve_forever(void *s) {
                inet_ntoa(client_address.sin_addr),
                client_address.sin_port);
 
-        work *w = malloc(sizeof(work)); // listener thread assigns priority for work
-        w->client_fd = client_fd;
-        add_work(w);
-        // signal to worker threads?
+        struct work_copy *wc = malloc(sizeof(work_copy)); // listener thread assigns priority for work
+        
+        parse_client_request(client_fd, wc);
 
-        //=== Worker thread function
+        struct work *w; 
+        if (strcmp(wc->path, GETJOBCMD) == 0) {
+            w = get_work_nonblocking();
+            if (w == NULL) {
+                printf("queue empty\n");
+                send_error_response(client_fd, QUEUE_EMPTY, "Queue Empty");
+                shutdown(client_fd, SHUT_WR);
+                close(client_fd);
+                continue;
+            } else {
+                send_error_response(client_fd, OK, w->path);
+                shutdown(client_fd, SHUT_WR);
+                close(client_fd);
+                continue;
+            }
+        }
 
-        //serve_request(client_fd);
+        w = malloc (sizeof(work));
+
+        w->buffer = wc->buffer;
+        w->bytes_read = wc->bytes_read;
+        w->client_fd = wc->client_fd;
+        w->delay = wc->delay;
+        w->path = wc->path;
+        w->priority = wc->priority;
 
 
-        // close the connection to the client
-        //shutdown(client_fd, SHUT_WR);
-        //close(client_fd);
-
-        //===
+        // if p->path is getjob, call get_work_nonblocking()
+        
+        if (add_work(w) < 0) {
+            printf("send error response \n");
+            send_error_response(client_fd, QUEUE_FULL, "Queue Full");
+            shutdown(client_fd, SHUT_WR);
+            close(client_fd);
+        }
+        // signal to worker threads
 
     }
 
@@ -206,7 +234,10 @@ void *do_work(void *v) {
         w = get_work();
         if (w != NULL) {
             printf("working\n");
-            serve_request(w->client_fd);
+            if (w->delay > 0) {
+                sleep(w->delay);
+            }
+            serve_request(w->client_fd, w);
             shutdown(w->client_fd, SHUT_WR);
             close(w->client_fd);
         }

@@ -1,15 +1,19 @@
 // Heap Implementation
 
+typedef struct work {
+    int priority;
+    char *path;
+    int delay;
+    int client_fd;
+    char *buffer;
+    int bytes_read;
+} work;
+
 typedef struct heap {
     int size;
     int capacity;
     struct work **arr;
 } heap;
-
-typedef struct work {
-    int priority;
-    int client_fd;
-} work;
 
 struct heap *create_heap(int capacity);
 
@@ -31,4 +35,4 @@ int add_work(work *w);
 
 work *get_work();
 
-int get_work_nonblocking();
+work *get_work_nonblocking();

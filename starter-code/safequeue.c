@@ -1,6 +1,7 @@
 #include "safequeue.h"
 #include "pthread.h"
 #include "stdlib.h"
+#include "stdio.h"
 
 heap *myHeap;
 pthread_mutex_t lock; 
@@ -14,11 +15,15 @@ int create_queue(int size) {
 
 // Add a unit of work to the queue
 int add_work(work *w) {
+    pthread_mutex_lock(&lock);
     if (myHeap == NULL) {
         exit(-1);
     }
-    pthread_mutex_lock(&lock);
-    insert(myHeap, w);
+    if (insert(myHeap, w) < 0) {
+        pthread_mutex_unlock(&lock);
+
+        return -1;
+    }
     pthread_mutex_unlock(&lock);
     return 0;
 }
@@ -39,8 +44,16 @@ work *get_work() {
     return w;
 }
 
-int get_work_nonblocking() {
-    return 0;
+work *get_work_nonblocking() {
+    work *w;
+    pthread_mutex_lock(&lock);
+    if (myHeap->size == 0) {
+        pthread_mutex_unlock(&lock);
+        return NULL;
+    }
+    w = extractMax(myHeap);
+    pthread_mutex_unlock(&lock);
+    return w;
 }
 
 struct heap *create_heap(int capacity) {
@@ -52,6 +65,7 @@ struct heap *create_heap(int capacity) {
 }
 
 int insert(heap *h, work *w) {
+    printf("Inserting - current size: %d, heap capacity: %d\n",h->size,h->capacity);
     if (h->size >= h->capacity) {
         return -1;
     }
