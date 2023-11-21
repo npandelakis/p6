@@ -1,3 +1,6 @@
+
+#include "pthread.h"
+
 // Heap Implementation
 
 typedef struct work {

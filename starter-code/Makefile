@@ -8,10 +8,10 @@ EXECUTABLE=proxyserver
 all: $(SOURCES) $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
-	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+	$(CC) -g $(LDFLAGS) $(OBJECTS) -o $@
 
 .c.o:
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) -g $(CFLAGS) $< -o $@
 
 clean:
 	rm -f $(EXECUTABLE) $(OBJECTS)

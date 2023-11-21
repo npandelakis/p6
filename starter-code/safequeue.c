@@ -5,10 +5,12 @@
 
 heap *myHeap;
 pthread_mutex_t lock; 
+pthread_cond_t cond; 
 
 // Create threadsafe queue
 int create_queue(int size) {
     pthread_mutex_init(&lock, NULL);
+    pthread_cond_init(&cond, NULL);
     myHeap = create_heap(size);
     return 0;
 }
@@ -24,6 +26,7 @@ int add_work(work *w) {
 
         return -1;
     }
+    pthread_cond_signal(&cond);
     pthread_mutex_unlock(&lock);
     return 0;
 }
@@ -31,14 +34,10 @@ int add_work(work *w) {
 work *get_work() {
     work *w;
     pthread_mutex_lock(&lock);
-    if (myHeap->size == 0) {
-        pthread_mutex_unlock(&lock);
-        return NULL;
+    while (myHeap->size == 0) {
+        // If there is no work, sleep and release mutex
+        pthread_cond_wait(&cond, &lock);
     }
-    // while (myHeap->size == 0) {
-        // condition variable
-    //}
-    // If there is no work, sleep and release mutex
     w = extractMax(myHeap);
     pthread_mutex_unlock(&lock);
     return w;
@@ -65,7 +64,6 @@ struct heap *create_heap(int capacity) {
 }
 
 int insert(heap *h, work *w) {
-    printf("Inserting - current size: %d, heap capacity: %d\n",h->size,h->capacity);
     if (h->size >= h->capacity) {
         return -1;
     }

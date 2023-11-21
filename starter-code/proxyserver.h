@@ -195,7 +195,6 @@ void parse_client_request(int fd, struct work_copy *w) {
     int bytes_read = read(fd, read_buffer, LIBHTTP_REQUEST_MAX_SIZE);
     memcpy(read_buffer_copy, read_buffer, LIBHTTP_REQUEST_MAX_SIZE);
     read_buffer[bytes_read] = '\0'; /* Always null-terminate. */
-    printf("read buffer %s\n\n", read_buffer);
 
     int delay = -1;
     int priority = -1;

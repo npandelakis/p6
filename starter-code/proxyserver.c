@@ -39,15 +39,14 @@ char *fileserver_ipaddr;
 int fileserver_port;
 int max_queue_size;
 
+
 void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
     http_start_response(client_fd, err_code);
     http_send_header(client_fd, "Content-Type", "text/html");
     http_end_headers(client_fd);
     char *buf = malloc(strlen(err_msg) + 2);
     sprintf(buf, "%s\n", err_msg);
-    printf("%s\n", err_msg);
     http_send_string(client_fd, buf);
-    printf("sent string to client %d\n",client_fd);
     return;
 }
 
@@ -57,15 +56,12 @@ void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
  */
 void serve_request(int client_fd, struct work *w) {
 
-    printf("fileserver_fd\n");
     // create a fileserver socket
     int fileserver_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (fileserver_fd == -1) {
         fprintf(stderr, "Failed to create a new socket: error %d: %s\n", errno, strerror(errno));
         exit(errno);
     }
-
-    printf("after fileserver_fd: %d\n",fileserver_fd);
 
     // create the full fileserver address
     struct sockaddr_in fileserver_address;
@@ -78,9 +74,7 @@ void serve_request(int client_fd, struct work *w) {
                                     sizeof(fileserver_address));
     if (connection_status < 0) {
         // failed to connect to the fileserver
-        printf("Failed to connect to the file server\n");
         send_error_response(client_fd, BAD_GATEWAY, "Bad Gateway");
-        return;
     }
     // successfully connected to the file server
     // char *buffer = (char *)malloc(RESPONSE_BUFSIZE * sizeof(char));
@@ -88,9 +82,7 @@ void serve_request(int client_fd, struct work *w) {
     // int bytes_read = read(client_fd, buffer, RESPONSE_BUFSIZE);
     int ret = http_send_data(fileserver_fd, w->buffer, w->bytes_read);
     if (ret < 0) {
-        printf("Failed to send request to the file server\n");
         send_error_response(client_fd, BAD_GATEWAY, "Bad Gateway");
-
     } else {
         // forward the fileserver response to the client
         while (1) {
@@ -107,9 +99,6 @@ void serve_request(int client_fd, struct work *w) {
     // close the connection to the fileserver
     shutdown(fileserver_fd, SHUT_WR);
     close(fileserver_fd);
-
-    // Free resources and exit
-    free(w->buffer);
 }
 
 
@@ -121,10 +110,8 @@ int server_fd_2;
  * connection, calls request_handler with the accepted fd number.
  */
 void *serve_forever(void *s) {
-    printf("serve_forever\n");
     int *server_fd = ((struct serve_args *)s)->server_fd;
     int i = ((struct serve_args *)s)->port_index;
-    printf("initialized serve_args\n");
     // create a socket to listen
     *server_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (*server_fd == -1) {
@@ -168,7 +155,6 @@ void *serve_forever(void *s) {
     size_t client_address_length = sizeof(client_address);
     int client_fd;
     while (1) {
-        printf("listening\n");
         client_fd = accept(*server_fd,
                            (struct sockaddr *)&client_address,
                            (socklen_t *)&client_address_length);
@@ -185,11 +171,11 @@ void *serve_forever(void *s) {
         
         parse_client_request(client_fd, wc);
 
-        struct work *w; 
+        struct work *w;
+        // if p->path is getjob, call get_work_nonblocking()
         if (strcmp(wc->path, GETJOBCMD) == 0) {
             w = get_work_nonblocking();
             if (w == NULL) {
-                printf("queue empty\n");
                 send_error_response(client_fd, QUEUE_EMPTY, "Queue Empty");
                 shutdown(client_fd, SHUT_WR);
                 close(client_fd);
@@ -198,11 +184,15 @@ void *serve_forever(void *s) {
                 send_error_response(client_fd, OK, w->path);
                 shutdown(client_fd, SHUT_WR);
                 close(client_fd);
+                // Free resources
+                free(w->buffer);
+                free(w->path);
+                free(w);
                 continue;
             }
         }
 
-        w = malloc (sizeof(work));
+        w = malloc(sizeof(work));
 
         w->buffer = wc->buffer;
         w->bytes_read = wc->bytes_read;
@@ -211,14 +201,17 @@ void *serve_forever(void *s) {
         w->path = wc->path;
         w->priority = wc->priority;
 
+        free(wc);
 
-        // if p->path is getjob, call get_work_nonblocking()
         
         if (add_work(w) < 0) {
-            printf("send error response \n");
             send_error_response(client_fd, QUEUE_FULL, "Queue Full");
             shutdown(client_fd, SHUT_WR);
             close(client_fd);
+
+            free(w->buffer);
+            free(w->path);
+            free(w);
         }
         // signal to worker threads
 
@@ -233,13 +226,16 @@ void *do_work(void *v) {
     while(1) {
         w = get_work();
         if (w != NULL) {
-            printf("working\n");
             if (w->delay > 0) {
                 sleep(w->delay);
             }
             serve_request(w->client_fd, w);
             shutdown(w->client_fd, SHUT_WR);
             close(w->client_fd);
+            // Free resources
+            free(w->buffer);
+            free(w->path);
+            free(w);
         }
     }
 }
@@ -297,10 +293,8 @@ void join_threads(pthread_t *thread_array, int num_threads){
 }
 
 void create_workers(int num_workers) {
-    printf("create_workers\n");
-
     for(int i =0; i<num_workers;i++){
-        if(pthread_create(&worker_threads[i], NULL, do_work, NULL)!=0){
+        if(pthread_create(&worker_threads[i], NULL, do_work, NULL)!=0) {
             printf("error creating worker thread\n");
         }
     }
@@ -313,7 +307,7 @@ void create_listeners(int num_listeners) {
         args->server_fd = &server_fd_arr[i];
         args->port_index = i;
         serve_args_arr[i] = args;
-        if(pthread_create(&listener_threads[i], NULL, serve_forever, (void *)args)!=0){
+        if(pthread_create(&listener_threads[i], NULL, serve_forever, (void *)args)!=0) {
             printf("error creating listener thread\n");
         }
     }
@@ -357,11 +351,8 @@ int main(int argc, char **argv) {
     server_fd_arr = malloc(num_listener * sizeof(int));
 
     worker_threads = (pthread_t *)malloc(num_workers * sizeof(pthread_t));
-    printf("creating queue\n");
     create_queue(max_queue_size);
-    printf("creating workers\n");
     create_workers(num_workers);
-    printf("creating listeners\n");
     create_listeners(num_listener);
 
     join_threads(worker_threads, num_workers);
