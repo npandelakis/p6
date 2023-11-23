@@ -39,3 +39,5 @@ int add_work(work *w);
 work *get_work();
 
 work *get_work_nonblocking();
+
+void destroy_queue();

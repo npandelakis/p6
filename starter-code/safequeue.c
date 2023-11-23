@@ -6,6 +6,7 @@
 heap *myHeap;
 pthread_mutex_t lock; 
 pthread_cond_t cond; 
+int keep_heap=1;
 
 // Create threadsafe queue
 int create_queue(int size) {
@@ -34,13 +35,17 @@ int add_work(work *w) {
 work *get_work() {
     work *w;
     pthread_mutex_lock(&lock);
-    while (myHeap->size == 0) {
+    while (keep_heap && myHeap->size == 0) {
         // If there is no work, sleep and release mutex
         pthread_cond_wait(&cond, &lock);
     }
-    w = extractMax(myHeap);
+    if (keep_heap) {
+        w = extractMax(myHeap);
+        pthread_mutex_unlock(&lock);
+        return w;
+    }
     pthread_mutex_unlock(&lock);
-    return w;
+    return NULL;
 }
 
 work *get_work_nonblocking() {
@@ -82,10 +87,23 @@ work *extractMax(heap *h) {
 }
 
 void free_heap(heap *h) {
+    work *w;
     for(int i = 0; i < h-> size; i++) {
-        free(h->arr[i]);
+        w = h->arr[i];
+        free(w->buffer);
+        free(w->path);
+        free(w);
     }
+    free(h->arr);
     free(h);
+}
+
+void destroy_queue() {
+    keep_heap = 0;
+    pthread_mutex_lock(&lock);
+    free_heap(myHeap);
+    pthread_mutex_unlock(&lock);
+    pthread_cond_broadcast(&cond);
 }
 
 void swap(work **a, work **b){

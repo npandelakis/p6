@@ -38,6 +38,7 @@ pthread_t *worker_threads;
 char *fileserver_ipaddr;
 int fileserver_port;
 int max_queue_size;
+int running = 1;
 
 
 void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
@@ -47,6 +48,7 @@ void send_error_response(int client_fd, status_code_t err_code, char *err_msg) {
     char *buf = malloc(strlen(err_msg) + 2);
     sprintf(buf, "%s\n", err_msg);
     http_send_string(client_fd, buf);
+    free(buf);
     return;
 }
 
@@ -101,9 +103,6 @@ void serve_request(int client_fd, struct work *w) {
     close(fileserver_fd);
 }
 
-
-int server_fd_1;
-int server_fd_2;
 /*
  * opens a TCP stream socket on all interfaces with port number PORTNO. Saves
  * the fd number of the server socket in *socket_number. For each accepted
@@ -154,7 +153,7 @@ void *serve_forever(void *s) {
     struct sockaddr_in client_address;
     size_t client_address_length = sizeof(client_address);
     int client_fd;
-    while (1) {
+    while (running) {
         client_fd = accept(*server_fd,
                            (struct sockaddr *)&client_address,
                            (socklen_t *)&client_address_length);
@@ -217,13 +216,15 @@ void *serve_forever(void *s) {
 
     }
 
-    shutdown(*server_fd, SHUT_RDWR);
-    close(*server_fd);
+    // shutdown(*server_fd, SHUT_RDWR);
+    // close(*server_fd);
+    pthread_exit(NULL);
+
 }
 
 void *do_work(void *v) {
     work *w;
-    while(1) {
+    while(running) {
         w = get_work();
         if (w != NULL) {
             if (w->delay > 0) {
@@ -238,6 +239,7 @@ void *do_work(void *v) {
             free(w);
         }
     }
+    pthread_exit(NULL);
 }
 
 /*
@@ -268,13 +270,21 @@ void print_settings() {
     printf("\t  ----\t----\t\n");
 }
 
+void join_threads(pthread_t *thread_array, int num_threads){
+    for(int i=0; i<num_threads;i++){
+        pthread_join(thread_array[i],NULL);
+    }
+}
+
 void signal_callback_handler(int signum) {
     printf("Caught signal %d: %s\n", signum, strsignal(signum));
-    for (int i = 0; i < num_listener; i++) {
-        if (close(server_fd_1) < 0) perror("Failed to close server_fd (ignoring)\n");
-        if (close(server_fd_2) < 0) perror("Failed to close server_fd (ignoring)\n");
-    }
-    free(listener_ports);
+    // for (int i = 0; i < num_listener; i++) {
+    //     if (close(server_fd_arr[i]) < 0) perror("Failed to close server_fd (ignoring)\n");
+    // }
+    running = 0;
+    destroy_queue();
+    //join_threads(worker_threads, num_workers);
+    //join_threads(listener_threads, num_listener);
     exit(0);
 }
 
@@ -284,12 +294,6 @@ char *USAGE =
 void exit_with_usage() {
     fprintf(stderr, "%s", USAGE);
     exit(EXIT_SUCCESS);
-}
-
-void join_threads(pthread_t *thread_array, int num_threads){
-    for(int i=0; i<num_threads;i++){
-        pthread_join(thread_array[i],NULL);
-    }
 }
 
 void create_workers(int num_workers) {
@@ -354,9 +358,16 @@ int main(int argc, char **argv) {
     create_queue(max_queue_size);
     create_workers(num_workers);
     create_listeners(num_listener);
-
     join_threads(worker_threads, num_workers);
     join_threads(listener_threads, num_listener);
+    for(int i=0; i < num_listener;i++){
+        if (serve_args_arr[i] != NULL) {
+            free(serve_args_arr[i]);
+        }
+    }
+    free(server_fd_arr);
+    free(listener_threads);
+    free(worker_threads);
 
     return EXIT_SUCCESS;
 }
